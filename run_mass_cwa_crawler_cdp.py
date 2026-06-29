@@ -9,14 +9,11 @@ CSV_FILE = "整合後_完整測站資料_正規化.csv"
 # ===============================================
 
 def run_mass_cwa_crawler_cdp():
-    # 讀取 GitHub Secrets 傳進來的帳密
+    # 讀取 GitHub Secrets 傳進來的環境變數
     cwa_user = os.environ.get("CWA_USERNAME")
     cwa_pass = os.environ.get("CWA_PASSWORD")
+    cwa_cookie_str = os.environ.get("CWA_COOKIE") # 👈 讀取關鍵的 Cookie
     
-    if not cwa_user or not cwa_pass:
-        print("❌ 找不到帳號或密碼環境變數，請確認 GitHub Secrets 設定！")
-        return
-        
     # 讀取 CSV
     df_stations = pd.read_csv(CSV_FILE, encoding="utf-8-sig")
     df_stations['資料起始日期'] = pd.to_datetime(df_stations['資料起始日期'], errors='coerce')
@@ -26,11 +23,10 @@ def run_mass_cwa_crawler_cdp():
     yesterday = datetime.now() - timedelta(days=1)
     
     print(f"🎯 讀取成功！即將開始依據各測站存續期間下載資料...")
-
     print("🔗 正在啟動 Chromium 瀏覽器...")
+    
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) 
-        # 設定標準台灣語系與常用 User-Agent，最大程度偽裝成真實瀏覽器
         context = browser.new_context(
             accept_downloads=True,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
@@ -40,44 +36,57 @@ def run_mass_cwa_crawler_cdp():
         page.set_default_timeout(30000) 
         page.on("dialog", lambda dialog: dialog.dismiss())
 
-        # ==================== 🔐 網頁模擬登入與嚴格驗證區塊 🔐 ====================
         login_url = "https://agr.cwa.gov.tw/account/login"
         target_url = "https://agr.cwa.gov.tw/history/station_day"
         
-        print("🔑 正在連線至登入頁面...")
-        try:
-            page.goto(login_url, wait_until="networkidle")
-            
-            print("✍️ 填寫帳號與密碼...")
-            page.locator('input[name="account"]').fill(cwa_user)
-            page.locator('input[name="password"]').fill(cwa_pass)
-            page.wait_for_timeout(500)
-            
-            print("👆 發送登入請求 (按下 Enter)...")
-            page.locator('input[name="password"]').press("Enter")
-            
-            # 給予 5 秒讓非同步 AJAX 完成驗證與登入 Cookie 配發
-            page.wait_for_timeout(5000)
-            
-            # 存下登入當下的截圖
-            page.screenshot(path="login_result.png")
-            print("📸 已擷取登入結果截圖並儲存為 login_result.png")
-            
-            print(f"ℹ️ 登入判定點 - 當前網頁網址: {page.url}")
-            if "error_message" in page.url or "login" in page.url:
-                print("⚠️ 警告：網址仍停留在登入頁面，登入【確定失敗】！")
-                print("👉 請檢查：1. GitHub Secrets 的帳密是否打錯。 2. 氣象署防火牆封鎖了海外機房 IP。")
-            else:
-                print("✅ 網址已成功跳轉，可能已順利登入！")
-                
-        except Exception as e:
-            print(f"❌ 登入自動化控制發生異常: {e}")
-            return
+        # ==================== 🔥 核心修正：Cookie 注入機制 🔥 ====================
+        is_logged_in = False
+        
+        if cwa_cookie_str and cwa_cookie_str.strip():
+            print("🍪 偵測到 CWA_COOKIE，正在進行 Cookie 注入免密登入...")
+            try:
+                cookie_list = []
+                # 解析標準的 name1=value1; name2=value2 格式
+                for item in cwa_cookie_str.split(";"):
+                    item = item.strip()
+                    if "=" in item:
+                        k, v = item.split("=", 1)
+                        cookie_list.append({
+                            "name": k,
+                            "value": v,
+                            "domain": "agr.cwa.gov.tw",
+                            "path": "/"
+                        })
+                context.add_cookies(cookie_list)
+                print("✅ Cookie 注入成功！直接跳過登入步驟。")
+                is_logged_in = True
+            except Exception as ce:
+                print(f"⚠️ Cookie 解析注入失敗: {ce}，將嘗試常規帳密登入。")
+        
+        # 如果沒提供 Cookie 或注入失敗，才走原本的帳密登入（當作備援機制）
+        if not is_logged_in:
+            if not cwa_user or not cwa_pass:
+                print("❌ 找不到帳號密碼，且無可用 Cookie，爬蟲終止！")
+                return
+            print("🔑 未偵測到有效 Cookie，改走常規帳密登入頁面...")
+            try:
+                page.goto(login_url, wait_until="networkidle")
+                page.locator('input[name="account"]').fill(cwa_user)
+                page.locator('input[name="password"]').fill(cwa_pass)
+                page.wait_for_timeout(500)
+                page.locator('input[name="password"]').press("Enter")
+                page.wait_for_timeout(5000)
+            except Exception as e:
+                print(f"❌ 常規登入控制發生異常: {e}")
+                return
+        # =======================================================================
         
         print("🚀 前往目標數據頁面...")
         page.goto(target_url, wait_until="networkidle")
         page.wait_for_timeout(3000) 
-        # ===================================================================
+        
+        # 截張圖確認此時進入數據頁面的狀態（是否成功解鎖權限）
+        page.screenshot(path="target_page_status.png")
         
         for index, row in df_stations.iterrows():
             st_code = str(row['站號']).strip()
@@ -96,28 +105,23 @@ def run_mass_cwa_crawler_cdp():
             if target_url not in page.url:
                 page.goto(target_url, wait_until="networkidle")
 
-            # 🔥 下拉選單操作（內建全自動診斷機制）
+            # 下拉選單操作
             try:
-                # 1. 選擇站別
-                page.locator("select").nth(0).select_option(label=st_type, timeout=3000)
+                page.locator("select").nth(0).select_option(label=st_type, timeout=4000)
                 page.wait_for_timeout(500)
                 
-                # 2. 選擇區域
-                page.locator("select").nth(1).select_option(label=st_region, timeout=3000)
-                page.wait_for_timeout(2000) 
+                page.locator("select").nth(1).select_option(label=st_region, timeout=4000)
+                page.wait_for_timeout(2500) 
                 
-                # 3. 選擇測站
-                page.locator("select").nth(2).select_option(value=st_code, timeout=3000)
+                page.locator("select").nth(2).select_option(value=st_code, timeout=4000)
                 page.wait_for_timeout(1000)
                 
             except Exception as e:
                 print(f"   ❌ 選單選取失敗！正在啟動天眼診斷機制...")
                 try:
-                    # 抓出當前網頁上第一個選單（站別）到底出現了哪些選項
                     current_options = page.locator("select").nth(0).locator("option").all_inner_texts()
                     print(f"   🔍 [診斷結果] 目前網頁「站別選單」中實際存在的選項有：{current_options}")
                     print(f"   🔍 [診斷結果] 我們剛才試圖尋找的選項是：'{st_type}'")
-                    print(f"   🔍 [診斷結果] 當前瀏覽器實際停留在網址：{page.url}")
                 except Exception as diag_err:
                     print(f"   🔍 [診斷結果] 無法獲取選單內容: {diag_err}")
                 
@@ -129,7 +133,6 @@ def run_mass_cwa_crawler_cdp():
                 page.goto(target_url, wait_until="networkidle")
                 continue
 
-            # --- 年度迴圈 ---
             for year in range(start_date_limit.year, end_date_limit.year + 1):
                 year_start = max(start_date_limit, datetime(year, 1, 1))
                 year_end = min(end_date_limit, datetime(year, 12, 31))
