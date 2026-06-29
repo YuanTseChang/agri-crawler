@@ -36,3 +36,11 @@ jobs:
           git add daily/
           git commit -m "Auto-update CWA daily weather data" || echo "No changes to commit"
           git push
+          
+      # 👇 🔥 新增這個步驟 🔥 👇
+      - name: 上傳登入除錯截圖
+        uses: actions/upload-artifact@v4
+        if: always() # 確保就算前面失敗了，這一步也一定會執行
+        with:
+          name: cwa-login-screenshot
+          path: login_result.png
