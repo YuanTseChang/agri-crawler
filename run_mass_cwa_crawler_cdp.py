@@ -76,7 +76,7 @@ def run_mass_cwa_crawler_cdp():
         
         print("🚀 前往目標數據頁面...")
         page.goto(target_url, wait_until="networkidle")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(3000) 
         # ===================================================================
         
         for index, row in df_stations.iterrows():
@@ -85,7 +85,6 @@ def run_mass_cwa_crawler_cdp():
             st_region = str(row['區域']).strip()
             st_type = str(row['站別']).strip()
             
-            # --- 計算該測站起訖 ---
             start_date_limit = row['資料起始日期'] if pd.notnull(row['資料起始日期']) else datetime(2019, 1, 1)
             end_date_limit = row['撤站日期'] if pd.notnull(row['撤站日期']) else yesterday
             
@@ -94,57 +93,44 @@ def run_mass_cwa_crawler_cdp():
             
             print(f"\n🏭 [{index+1}/{total_stations}] {st_name} ({st_code}) | 區間: {start_date_limit.strftime('%Y-%m-%d')} ~ {end_date_limit.strftime('%Y-%m-%d')}")
             
-            # 確保在目標頁面
             if target_url not in page.url:
                 page.goto(target_url, wait_until="networkidle")
 
-            # 下拉選單操作
-            # (修改後的程式碼)
-            # --- 替換從這裡開始的下拉選單操作 ---
+            # 🔥 下拉選單操作（內建全自動診斷機制）
             try:
-                # 1. 選擇站別 (Station Type)
-                try:
-                    page.locator("select").nth(0).select_option(label=st_type, timeout=3000)
-                except:
-                    raise Exception(f"選單找不到對應的「站別」: {st_type}")
+                # 1. 選擇站別
+                page.locator("select").nth(0).select_option(label=st_type, timeout=3000)
+                page.wait_for_timeout(500)
                 
-                # 🔥 延長等待：給 GitHub 跨海連線緩衝
-                page.wait_for_timeout(1500) 
-                
-                # 2. 選擇區域 (Region)
-                try:
-                    page.locator("select").nth(1).select_option(label=st_region, timeout=3000)
-                except:
-                    raise Exception(f"選單找不到對應的「區域」: {st_region}")
-                
-                # 🔥 延長等待：等待 AJAX 請求把該區域的測站名單拉回來
+                # 2. 選擇區域
+                page.locator("select").nth(1).select_option(label=st_region, timeout=3000)
                 page.wait_for_timeout(2000) 
                 
-                # 3. 選擇測站 (Station)
-                try:
-                    page.locator("select").nth(2).select_option(value=st_code, timeout=4000)
-                except:
-                    raise Exception(f"區域載入完成，但測站列表中沒有 {st_name} ({st_code})")
-                
+                # 3. 選擇測站
+                page.locator("select").nth(2).select_option(value=st_code, timeout=3000)
                 page.wait_for_timeout(1000)
                 
             except Exception as e:
-                print(f"   ⚠️ {e}。直接跳過！")
-                # 為了避免殘留錯誤的選單狀態，重新整理頁面
-                page.goto(target_url, wait_until="networkidle") 
-                continue # 放棄這個測站，直接進入下一個
-            # ------------------------------------
+                print(f"   ❌ 選單選取失敗！正在啟動天眼診斷機制...")
+                try:
+                    # 抓出當前網頁上第一個選單（站別）到底出現了哪些選項
+                    current_options = page.locator("select").nth(0).locator("option").all_inner_texts()
+                    print(f"   🔍 [診斷結果] 目前網頁「站別選單」中實際存在的選項有：{current_options}")
+                    print(f"   🔍 [診斷結果] 我們剛才試圖尋找的選項是：'{st_type}'")
+                    print(f"   🔍 [診斷結果] 當前瀏覽器實際停留在網址：{page.url}")
+                except Exception as diag_err:
+                    print(f"   🔍 [診斷結果] 無法獲取選單內容: {diag_err}")
+                
+                print(f"   ⚠️ 無法選取 {st_name} ({st_code})，直接跳過此測站！")
+                continue 
             
-            # --- 【新增檢查邏輯】 ---
             if page.get_by_text("此站無觀測要素").count() > 0:
                 print(f"   ⚠️ {st_name} 無觀測要素，直接跳過此測站。")
                 page.goto(target_url, wait_until="networkidle")
                 continue
-            # ----------------------
 
             # --- 年度迴圈 ---
             for year in range(start_date_limit.year, end_date_limit.year + 1):
-                # 計算該年份的實際起訖 (不能超過測站的起始/撤站限制)
                 year_start = max(start_date_limit, datetime(year, 1, 1))
                 year_end = min(end_date_limit, datetime(year, 12, 31))
                 
@@ -152,7 +138,6 @@ def run_mass_cwa_crawler_cdp():
                 end_str = year_end.strftime("%Y-%m-%d")
                 target_path = os.path.join(output_dir, f"{year}.csv")
                 
-                # 斷點續傳
                 if os.path.exists(target_path) and os.path.getsize(target_path) > 500:
                     print(f"   ⏭️  {year} 年已存在，跳過。")
                     continue
@@ -160,11 +145,9 @@ def run_mass_cwa_crawler_cdp():
                 print(f"   📅 下載 {year} ({start_str} ~ {end_str}) ...")
                 
                 try:
-                    # 全選觀測要素
                     items_select = page.locator("select").nth(3)
                     items_select.evaluate("select => { for (let opt of select.options) opt.selected = true; select.dispatchEvent(new Event('change', { bubbles: true })); }")
                     
-                    # 填入日期
                     page.evaluate(f"""() => {{
                         const inputs = Array.from(document.querySelectorAll('input')).filter(i => i.value.match(/^\d{{4}}-\d{{2}}-\d{{2}}$/));
                         if(inputs.length >= 2) {{
@@ -173,22 +156,17 @@ def run_mass_cwa_crawler_cdp():
                         }}
                     }}""")
                     
-                    # 點擊排序
                     try: page.locator("input[type='radio']").last.click()
                     except: page.get_by_text("依觀測時間排序").click()
                     
-                    # 【核心關鍵】等待下載按鈕出現 (設定 3 秒超時，沒資料就跳出)
                     download_btn = page.locator("button:has-text('下載檔案')")
                     if download_btn.count() == 0: download_btn = page.locator(".btn-success, button").last
                     
-                    # 只要 3 秒內按鈕無法使用，直接拋出錯誤跳過
                     download_btn.wait_for(state="visible", timeout=3000)
                     
                     with page.expect_download(timeout=5000) as download_info:
                         download_btn.click()
-                            
-                        # 額外偵測：如果點擊後網址變成了 create_report，代表下載失敗
-                        page.wait_for_timeout(800) # 給網頁 0.8 秒反應
+                        page.wait_for_timeout(800) 
                         if "create_report" in page.url:
                             raise Exception("網頁進入空白報告頁，下載失敗")
  
@@ -197,14 +175,12 @@ def run_mass_cwa_crawler_cdp():
                     
                 except Exception as e:
                     print(f"   ⚠️ {year} 年下載失敗或跳轉白頁，跳過...")
-                    # 強制導航回目標頁，清除空白頁狀態
                     page.goto(target_url, wait_until="networkidle")
-                    # 重新選取測站 (為了讓下一年的迴圈能正常執行)
                     page.locator("select").nth(0).select_option(label=st_type)
                     page.locator("select").nth(1).select_option(label=st_region)
                     page.locator("select").nth(2).select_option(value=st_code)
                     page.wait_for_timeout(1000)
-                    continue # 進入下一個年份
+                    continue 
 
         print("\n🎉 所有測站全部完成！")
 
