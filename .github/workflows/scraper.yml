@@ -26,6 +26,7 @@ jobs:
         env:
           CWA_USERNAME: ${{ secrets.CWA_USERNAME }}
           CWA_PASSWORD: ${{ secrets.CWA_PASSWORD }}
+          CWA_COOKIE: ${{ secrets.CWA_COOKIE }}
         run: python run_mass_cwa_crawler_cdp.py
 
       - name: 提交並推送資料到 GitHub
