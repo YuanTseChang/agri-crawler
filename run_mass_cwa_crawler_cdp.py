@@ -59,6 +59,18 @@ def run_mass_cwa_crawler_cdp():
             # 因為是 AJAX 登入，強迫等待 4 秒讓伺服器驗證並配發全新 Session Cookie
             page.wait_for_timeout(4000)
             print("✅ 登入驗證完成！")
+            # 🔥 延長等待並拍下登入後的真面目
+            page.wait_for_timeout(5000) 
+            page.screenshot(path="login_result.png") # 👈 新增這行：拍下關鍵畫面！
+            print("📸 已擷取登入結果截圖並儲存為 login_result.png")
+            
+            print("✅ 登入請求已發送，準備前往目標頁面！")
+            
+        except Exception as e:
+            print(f"❌ 登入過程發生錯誤: {e}")
+            page.screenshot(path="login_error.png") # 👈 失敗也拍一張
+            return
+        
             
         except Exception as e:
             print(f"❌ 登入自動化控制發生錯誤: {e}")
