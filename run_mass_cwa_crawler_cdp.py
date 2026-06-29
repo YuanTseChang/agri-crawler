@@ -38,17 +38,26 @@ def run_mass_cwa_crawler_cdp():
         # ==================== 新增：自動登入區塊 ====================
         print("🔐 正在執行自動登入...")
         login_url = "https://agr.cwa.gov.tw/account/login"
+        
+        # 1. 前往登入頁，並確保網路載入完畢
         page.goto(login_url, wait_until="networkidle")
         
-        # 根據網頁原始碼填寫正確的 locator
+        # 2. 填入帳密
         page.locator('input[name="account"]').fill(cwa_user)
         page.locator('input[name="password"]').fill(cwa_pass)
         
-        # 點擊 id 為 login 的按鈕
+        # 3. 點擊登入，並同時等待網頁跳轉 (這可以確保 Cookie 成功寫入)
         page.locator('#login').click()
         
-        # 等待網頁跳轉回首頁或目標頁面，確認登入成功
-        page.wait_for_timeout(3000) 
+        print("⏳ 等待登入跳轉中...")
+        # 強化等待：等 5 秒讓網頁處理登入與 Session 寫入
+        page.wait_for_timeout(5000) 
+        
+        # 4. 正式前往目標爬蟲頁面
+        target_url = "https://agr.cwa.gov.tw/history/station_day"
+        page.goto(target_url, wait_until="networkidle")
+        page.wait_for_timeout(2000) # 給選單元件額外 2 秒的渲染時間
+        
         print("✅ 登入步驟完成，準備開始爬蟲！")
         # ==========================================================
 
