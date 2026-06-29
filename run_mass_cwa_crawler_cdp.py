@@ -17,6 +17,7 @@ def run_mass_cwa_crawler_cdp():
         print("❌ 找不到帳號或密碼環境變數，請確認 GitHub Secrets 設定！")
         return
         
+    # 讀取 CSV
     df_stations = pd.read_csv(CSV_FILE, encoding="utf-8-sig")
     df_stations['資料起始日期'] = pd.to_datetime(df_stations['資料起始日期'], errors='coerce')
     df_stations['撤站日期'] = pd.to_datetime(df_stations['撤站日期'], errors='coerce')
@@ -26,11 +27,10 @@ def run_mass_cwa_crawler_cdp():
     
     print(f"🎯 讀取成功！即將開始依據各測站存續期間下載資料...")
 
-    print("🔗 正在連線至真實 Chrome...")
+    print("🔗 正在啟動 Chromium 瀏覽器...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) 
-        
-        # 建議加上 User-Agent，降低被伺服器阻擋的機率
+        # 加上 User-Agent 偽裝成一般 Windows 瀏覽器，避免機房 IP 被秒擋
         context = browser.new_context(
             accept_downloads=True,
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -39,41 +39,35 @@ def run_mass_cwa_crawler_cdp():
         page.set_default_timeout(30000) 
         page.on("dialog", lambda dialog: dialog.dismiss())
 
-        # ==================== 修改：真實模擬 UI 登入區塊 ====================
-        print("🔑 正在執行自動化登入程序...")
+        # ==================== 🔥 修正：真實模擬網頁登入區塊 🔥 ====================
         login_url = "https://agr.cwa.gov.tw/account/login"
+        target_url = "https://agr.cwa.gov.tw/history/station_day"
         
+        print("🔑 正在連線至登入頁面...")
         try:
             page.goto(login_url, wait_until="networkidle")
             
-            # 填寫帳號 (這裡使用廣泛支援的選取器，會尋找 name 為 email 或 account 的輸入框)
-            # 若 CWA 網站的登入框有特定的 id，可改為 page.locator("#id名稱").fill(cwa_user)
-            page.locator("input[type='email'], input[type='text']").first.fill(cwa_user)
-            page.locator("input[type='password']").first.fill(cwa_pass)
+            # 依據 F12 結構，精準填入帳號與密碼
+            print("✍️ 填寫帳號與密碼...")
+            page.locator('input[name="account"]').fill(cwa_user)
+            page.locator('input[name="password"]').fill(cwa_pass)
             
-            # 點擊登入按鈕
-            page.locator("button[type='submit'], button:has-text('登入')").first.click()
+            # 點擊登入按鈕 (使用文字比對精準定位)
+            print("👆 點擊登入按鈕...")
+            page.locator("text=登入").first.click()
             
-            # 等待頁面跳轉 (成功登入後通常會跳轉回首頁或指定頁面)
-            # 我們給予 10 秒的時間讓 Laravel 伺服器處理驗證並配發最新 Cookie
-            page.wait_for_timeout(3000)
-            print("✅ 登入請求已發送，準備前往目標頁面！")
+            # 因為是 AJAX 登入，強迫等待 4 秒讓伺服器驗證並配發全新 Session Cookie
+            page.wait_for_timeout(4000)
+            print("✅ 登入驗證完成！")
             
         except Exception as e:
-            print(f"❌ 登入過程發生錯誤: {e}")
+            print(f"❌ 登入自動化控制發生錯誤: {e}")
             return
         
-        # 登入完成後，前往目標爬蟲頁面
-        target_url = "https://agr.cwa.gov.tw/history/station_day"
+        # 前往目標爬蟲頁面
         print("🚀 前往目標數據頁面...")
         page.goto(target_url, wait_until="networkidle")
-        page.wait_for_timeout(3000) 
-        # ===================================================================
-        
-        # ... 後面的 for index, row in df_stations.iterrows(): 迴圈保持完全不變 ...
-        for index, row in df_stations.iterrows():
-            st_code = str(row['站號']).strip()
-            # ... (保留你原本的所有測站處理邏輯) ...
+        page.wait_for_timeout(3000) # 給基礎網頁架構 3 秒渲染時間
         # ===================================================================
         
         for index, row in df_stations.iterrows():
