@@ -9,10 +9,14 @@ CSV_FILE = "整合後_完整測站資料_正規化.csv"
 # ===============================================
 
 def run_mass_cwa_crawler_cdp():
-    if not os.path.exists(CSV_FILE):
-        print(f"❌ 找不到 {CSV_FILE}，請先確認檔案是否存在！")
+    # 讀取 GitHub Secrets 傳進來的帳密
+    cwa_user = os.environ.get("CWA_USERNAME")
+    cwa_pass = os.environ.get("CWA_PASSWORD")
+    
+    if not cwa_user or not cwa_pass:
+        print("❌ 找不到帳號或密碼環境變數，請確認 GitHub Secrets 設定！")
         return
-
+        
     # 讀取 CSV
     df_stations = pd.read_csv(CSV_FILE, encoding="utf-8-sig")
     df_stations['資料起始日期'] = pd.to_datetime(df_stations['資料起始日期'], errors='coerce')
@@ -25,21 +29,28 @@ def run_mass_cwa_crawler_cdp():
 
     print("🔗 正在連線至真實 Chrome (Port 9222)...")
     with sync_playwright() as p:
-        try:
-            browser = p.chromium.launch(headless=True) # 雲端必須使用 headless 模式
-        except Exception as e:
-            print(f"\n❌ 連線失敗！請確認 Chrome 偵錯模式: {e}")
-            return
-
-        context = browser.new_context(
-        accept_downloads=True,
-        user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" # 偽裝一下避免被氣象署擋
-        )
+        browser = p.chromium.launch(headless=True) 
+        context = browser.new_context(accept_downloads=True)
         page = context.new_page()
-        page.set_default_timeout(30000) # 設定基本逾時
-        
-        # 【核心關鍵】自動處理彈出視窗，遇到 Alert 立即關閉，防止卡死
+        page.set_default_timeout(30000) 
         page.on("dialog", lambda dialog: dialog.dismiss())
+
+        # ==================== 新增：自動登入區塊 ====================
+        print("🔐 正在執行自動登入...")
+        login_url = "https://agr.cwa.gov.tw/account/login"
+        page.goto(login_url, wait_until="networkidle")
+        
+        # 根據網頁原始碼填寫正確的 locator
+        page.locator('input[name="account"]').fill(cwa_user)
+        page.locator('input[name="password"]').fill(cwa_pass)
+        
+        # 點擊 id 為 login 的按鈕
+        page.locator('#login').click()
+        
+        # 等待網頁跳轉回首頁或目標頁面，確認登入成功
+        page.wait_for_timeout(3000) 
+        print("✅ 登入步驟完成，準備開始爬蟲！")
+        # ==========================================================
 
         target_url = "https://agr.cwa.gov.tw/history/station_day"
         
