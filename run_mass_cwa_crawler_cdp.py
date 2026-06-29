@@ -97,17 +97,40 @@ def run_mass_cwa_crawler_cdp():
 
             # 下拉選單操作
             # (修改後的程式碼)
+            # --- 替換從這裡開始的下拉選單操作 ---
             try:
-                # 下拉選單操作 (加入 timeout=3000，找不到選項只等 3 秒就放棄，不浪費 30 秒)
-                page.locator("select").nth(0).select_option(label=st_type, timeout=3000)
-                page.wait_for_timeout(300)
-                page.locator("select").nth(1).select_option(label=st_region, timeout=3000)
-                page.wait_for_timeout(300)
-                page.locator("select").nth(2).select_option(value=st_code, timeout=3000)
+                # 1. 選擇站別 (Station Type)
+                try:
+                    page.locator("select").nth(0).select_option(label=st_type, timeout=3000)
+                except:
+                    raise Exception(f"選單找不到對應的「站別」: {st_type}")
+                
+                # 🔥 延長等待：給 GitHub 跨海連線緩衝
+                page.wait_for_timeout(1500) 
+                
+                # 2. 選擇區域 (Region)
+                try:
+                    page.locator("select").nth(1).select_option(label=st_region, timeout=3000)
+                except:
+                    raise Exception(f"選單找不到對應的「區域」: {st_region}")
+                
+                # 🔥 延長等待：等待 AJAX 請求把該區域的測站名單拉回來
+                page.wait_for_timeout(2000) 
+                
+                # 3. 選擇測站 (Station)
+                try:
+                    page.locator("select").nth(2).select_option(value=st_code, timeout=4000)
+                except:
+                    raise Exception(f"區域載入完成，但測站列表中沒有 {st_name} ({st_code})")
+                
                 page.wait_for_timeout(1000)
+                
             except Exception as e:
-                print(f"   ⚠️ 網頁選單中找不到 {st_name} ({st_code}) 的選項 (可能已下架)。直接跳過！")
-                continue # 放棄這個測站，直接進入下一個測站的迴圈
+                print(f"   ⚠️ {e}。直接跳過！")
+                # 為了避免殘留錯誤的選單狀態，重新整理頁面
+                page.goto(target_url, wait_until="networkidle") 
+                continue # 放棄這個測站，直接進入下一個
+            # ------------------------------------
             
             # --- 【新增檢查邏輯】 ---
             if page.get_by_text("此站無觀測要素").count() > 0:
