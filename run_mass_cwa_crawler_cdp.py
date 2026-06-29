@@ -30,16 +30,17 @@ def run_mass_cwa_crawler_cdp():
     print("🔗 正在啟動 Chromium 瀏覽器...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) 
-        # 加上 User-Agent 偽裝成一般 Windows 瀏覽器，避免機房 IP 被秒擋
+        # 設定標準台灣語系與常用 User-Agent，最大程度偽裝成真實瀏覽器
         context = browser.new_context(
             accept_downloads=True,
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+            locale="zh-TW"
         )
         page = context.new_page()
         page.set_default_timeout(30000) 
         page.on("dialog", lambda dialog: dialog.dismiss())
 
-        # ==================== 🔥 修正：真實模擬網頁登入區塊 🔥 ====================
+        # ==================== 🔐 網頁模擬登入與嚴格驗證區塊 🔐 ====================
         login_url = "https://agr.cwa.gov.tw/account/login"
         target_url = "https://agr.cwa.gov.tw/history/station_day"
         
@@ -47,39 +48,35 @@ def run_mass_cwa_crawler_cdp():
         try:
             page.goto(login_url, wait_until="networkidle")
             
-            # 依據 F12 結構，精準填入帳號與密碼
             print("✍️ 填寫帳號與密碼...")
             page.locator('input[name="account"]').fill(cwa_user)
             page.locator('input[name="password"]').fill(cwa_pass)
+            page.wait_for_timeout(500)
             
-            # 點擊登入按鈕 (使用文字比對精準定位)
-            print("👆 點擊登入按鈕...")
-            page.locator("text=登入").first.click()
+            print("👆 發送登入請求 (按下 Enter)...")
+            page.locator('input[name="password"]').press("Enter")
             
-            # 因為是 AJAX 登入，強迫等待 4 秒讓伺服器驗證並配發全新 Session Cookie
-            page.wait_for_timeout(4000)
-            print("✅ 登入驗證完成！")
-            # 🔥 延長等待並拍下登入後的真面目
-            page.wait_for_timeout(5000) 
-            page.screenshot(path="login_result.png") # 👈 新增這行：拍下關鍵畫面！
+            # 給予 5 秒讓非同步 AJAX 完成驗證與登入 Cookie 配發
+            page.wait_for_timeout(5000)
+            
+            # 存下登入當下的截圖
+            page.screenshot(path="login_result.png")
             print("📸 已擷取登入結果截圖並儲存為 login_result.png")
             
-            print("✅ 登入請求已發送，準備前往目標頁面！")
-            
+            print(f"ℹ️ 登入判定點 - 當前網頁網址: {page.url}")
+            if "error_message" in page.url or "login" in page.url:
+                print("⚠️ 警告：網址仍停留在登入頁面，登入【確定失敗】！")
+                print("👉 請檢查：1. GitHub Secrets 的帳密是否打錯。 2. 氣象署防火牆封鎖了海外機房 IP。")
+            else:
+                print("✅ 網址已成功跳轉，可能已順利登入！")
+                
         except Exception as e:
-            print(f"❌ 登入過程發生錯誤: {e}")
-            page.screenshot(path="login_error.png") # 👈 失敗也拍一張
+            print(f"❌ 登入自動化控制發生異常: {e}")
             return
         
-            
-        except Exception as e:
-            print(f"❌ 登入自動化控制發生錯誤: {e}")
-            return
-        
-        # 前往目標爬蟲頁面
         print("🚀 前往目標數據頁面...")
         page.goto(target_url, wait_until="networkidle")
-        page.wait_for_timeout(3000) # 給基礎網頁架構 3 秒渲染時間
+        page.wait_for_timeout(3000)
         # ===================================================================
         
         for index, row in df_stations.iterrows():
