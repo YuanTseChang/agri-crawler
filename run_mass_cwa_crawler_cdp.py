@@ -63,12 +63,18 @@ def run_mass_cwa_crawler_cdp():
                 page.goto(target_url, wait_until="networkidle")
 
             # 下拉選單操作
-            page.locator("select").nth(0).select_option(label=st_type)
-            page.wait_for_timeout(300)
-            page.locator("select").nth(1).select_option(label=st_region)
-            page.wait_for_timeout(300)
-            page.locator("select").nth(2).select_option(value=st_code)
-            page.wait_for_timeout(1000)
+            # (修改後的程式碼)
+            try:
+                # 下拉選單操作 (加入 timeout=3000，找不到選項只等 3 秒就放棄，不浪費 30 秒)
+                page.locator("select").nth(0).select_option(label=st_type, timeout=3000)
+                page.wait_for_timeout(300)
+                page.locator("select").nth(1).select_option(label=st_region, timeout=3000)
+                page.wait_for_timeout(300)
+                page.locator("select").nth(2).select_option(value=st_code, timeout=3000)
+                page.wait_for_timeout(1000)
+            except Exception as e:
+                print(f"   ⚠️ 網頁選單中找不到 {st_name} ({st_code}) 的選項 (可能已下架)。直接跳過！")
+                continue # 放棄這個測站，直接進入下一個測站的迴圈
             
             # --- 【新增檢查邏輯】 ---
             if page.get_by_text("此站無觀測要素").count() > 0:
