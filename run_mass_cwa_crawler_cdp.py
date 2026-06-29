@@ -17,7 +17,6 @@ def run_mass_cwa_crawler_cdp():
         print("❌ 找不到帳號或密碼環境變數，請確認 GitHub Secrets 設定！")
         return
         
-    # 讀取 CSV
     df_stations = pd.read_csv(CSV_FILE, encoding="utf-8-sig")
     df_stations['資料起始日期'] = pd.to_datetime(df_stations['資料起始日期'], errors='coerce')
     df_stations['撤站日期'] = pd.to_datetime(df_stations['撤站日期'], errors='coerce')
@@ -27,34 +26,54 @@ def run_mass_cwa_crawler_cdp():
     
     print(f"🎯 讀取成功！即將開始依據各測站存續期間下載資料...")
 
-    print("🔗 正在連線至真實 Chrome (Port 9222)...")
+    print("🔗 正在連線至真實 Chrome...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True) 
-        context = browser.new_context(accept_downloads=True)
+        
+        # 建議加上 User-Agent，降低被伺服器阻擋的機率
+        context = browser.new_context(
+            accept_downloads=True,
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
         page = context.new_page()
         page.set_default_timeout(30000) 
         page.on("dialog", lambda dialog: dialog.dismiss())
 
-        # ==================== 新增：Cookie 注入通行證區塊 ====================
-        cwa_cookie_val = os.environ.get("CWA_COOKIE")
-        if not cwa_cookie_val:
-            print("❌ 找不到 CWA_COOKIE 環境變數，請確認 GitHub Secrets 設定！")
-            return
-            
-        print("🎫 正在注入本地登入憑證 (Cookie)...")
-        # 將憑證塞入瀏覽器上下文（這裡的 name 必須對應剛才在網頁上看到的 Cookie 名稱）
-        context.add_cookies([{
-            'name': 'laravel_session',  # ⚠️ 如果你在網頁看到是別的名字請修改
-            'value': cwa_cookie_val,
-            'domain': 'agr.cwa.gov.tw',
-            'path': '/'
-        }])
+        # ==================== 修改：真實模擬 UI 登入區塊 ====================
+        print("🔑 正在執行自動化登入程序...")
+        login_url = "https://agr.cwa.gov.tw/account/login"
         
-        # 直接前往目標爬蟲頁面，這時候網頁會判定你已經登入了！
+        try:
+            page.goto(login_url, wait_until="networkidle")
+            
+            # 填寫帳號 (這裡使用廣泛支援的選取器，會尋找 name 為 email 或 account 的輸入框)
+            # 若 CWA 網站的登入框有特定的 id，可改為 page.locator("#id名稱").fill(cwa_user)
+            page.locator("input[type='email'], input[type='text']").first.fill(cwa_user)
+            page.locator("input[type='password']").first.fill(cwa_pass)
+            
+            # 點擊登入按鈕
+            page.locator("button[type='submit'], button:has-text('登入')").first.click()
+            
+            # 等待頁面跳轉 (成功登入後通常會跳轉回首頁或指定頁面)
+            # 我們給予 10 秒的時間讓 Laravel 伺服器處理驗證並配發最新 Cookie
+            page.wait_for_timeout(3000)
+            print("✅ 登入請求已發送，準備前往目標頁面！")
+            
+        except Exception as e:
+            print(f"❌ 登入過程發生錯誤: {e}")
+            return
+        
+        # 登入完成後，前往目標爬蟲頁面
         target_url = "https://agr.cwa.gov.tw/history/station_day"
-        print("🚀 直接前往目標數據頁面...")
+        print("🚀 前往目標數據頁面...")
         page.goto(target_url, wait_until="networkidle")
-        page.wait_for_timeout(3000) # 給選單 3 秒渲染時間
+        page.wait_for_timeout(3000) 
+        # ===================================================================
+        
+        # ... 後面的 for index, row in df_stations.iterrows(): 迴圈保持完全不變 ...
+        for index, row in df_stations.iterrows():
+            st_code = str(row['站號']).strip()
+            # ... (保留你原本的所有測站處理邏輯) ...
         # ===================================================================
         
         for index, row in df_stations.iterrows():
