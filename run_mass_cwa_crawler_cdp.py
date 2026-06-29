@@ -35,33 +35,27 @@ def run_mass_cwa_crawler_cdp():
         page.set_default_timeout(30000) 
         page.on("dialog", lambda dialog: dialog.dismiss())
 
-        # ==================== 新增：自動登入區塊 ====================
-        print("🔐 正在執行自動登入...")
-        login_url = "https://agr.cwa.gov.tw/account/login"
+        # ==================== 新增：Cookie 注入通行證區塊 ====================
+        cwa_cookie_val = os.environ.get("CWA_COOKIE")
+        if not cwa_cookie_val:
+            print("❌ 找不到 CWA_COOKIE 環境變數，請確認 GitHub Secrets 設定！")
+            return
+            
+        print("🎫 正在注入本地登入憑證 (Cookie)...")
+        # 將憑證塞入瀏覽器上下文（這裡的 name 必須對應剛才在網頁上看到的 Cookie 名稱）
+        context.add_cookies([{
+            'name': 'laravel_session',  # ⚠️ 如果你在網頁看到是別的名字請修改
+            'value': cwa_cookie_val,
+            'domain': 'agr.cwa.gov.tw',
+            'path': '/'
+        }])
         
-        # 1. 前往登入頁，並確保網路載入完畢
-        page.goto(login_url, wait_until="networkidle")
-        
-        # 2. 填入帳密
-        page.locator('input[name="account"]').fill(cwa_user)
-        page.locator('input[name="password"]').fill(cwa_pass)
-        
-        # 3. 點擊登入，並同時等待網頁跳轉 (這可以確保 Cookie 成功寫入)
-        page.locator('#login').click()
-        
-        print("⏳ 等待登入跳轉中...")
-        # 強化等待：等 5 秒讓網頁處理登入與 Session 寫入
-        page.wait_for_timeout(5000) 
-        
-        # 4. 正式前往目標爬蟲頁面
+        # 直接前往目標爬蟲頁面，這時候網頁會判定你已經登入了！
         target_url = "https://agr.cwa.gov.tw/history/station_day"
+        print("🚀 直接前往目標數據頁面...")
         page.goto(target_url, wait_until="networkidle")
-        page.wait_for_timeout(2000) # 給選單元件額外 2 秒的渲染時間
-        
-        print("✅ 登入步驟完成，準備開始爬蟲！")
-        # ==========================================================
-
-        target_url = "https://agr.cwa.gov.tw/history/station_day"
+        page.wait_for_timeout(3000) # 給選單 3 秒渲染時間
+        # ===================================================================
         
         for index, row in df_stations.iterrows():
             st_code = str(row['站號']).strip()
