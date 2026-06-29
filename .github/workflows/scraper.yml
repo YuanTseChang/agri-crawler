@@ -1,0 +1,34 @@
+name: CWA Daily Crawler
+
+on:
+  workflow_dispatch: # 允許你手動點擊執行
+  schedule:
+    - cron: '0 18 * * *' # 每天台灣時間凌晨 2 點自動執行 (UTC 18:00)
+
+jobs:
+  scrape-and-save:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 取得程式碼
+        uses: actions/checkout@v3
+
+      - name: 設定 Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 安裝套件
+        run: |
+          pip install pandas playwright
+          playwright install chromium
+
+      - name: 執行爬蟲腳本
+        run: python run_mass_cwa_crawler_cdp.py
+
+      - name: 提交並推送資料到 GitHub
+        run: |
+          git config --local user.email "yuan610377@gmail.com"
+          git config --local user.name "YuanTseChang"
+          git add daily/
+          git commit -m "Auto-update CWA daily weather data" || echo "No changes to commit"
+          git push
